@@ -46,14 +46,14 @@ button:disabled{opacity:.5}
 </head>
 <body>
 <div class="screen" id="setup">
-<h1>JOURNEY</h1>
+<h1>JOURNEY v3</h1>
 <label for="s">Start (empty = my location)</label>
 <input id="s" placeholder="Place, Google Maps link or coordinates">
 <label for="d">Destination</label>
 <input id="d" placeholder="Place, Google Maps link or coordinates">
 <button id="go">Start</button>
 <button class="alt" id="demo">Demo</button>
-<p id="err"></p>
+<p id="err" style="color:#7a828f">Loading… (if this never changes to Ready, the code did not upload fully)</p>
 </div>
 
 <div class="screen hide" id="trip">
@@ -72,6 +72,7 @@ button:disabled{opacity:.5}
 </div>
 
 <script>
+window.onerror=function(m){var e=document.getElementById("err");if(e){e.style.color="#f87171";e.textContent="Error: "+m}};
 const $=id=>document.getElementById(id);
 let pts=[],cum=[],total=0,durH=0,best=0,watchId=null,timer=null,clockT=null,t0=0,last=null,speeds=[],wl=null;
 
@@ -83,8 +84,9 @@ const hm=d=>d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
 
 function parseLoc(t){
 try{t=decodeURIComponent((t||"").trim())}catch(e){t=(t||"").trim()}
-const m=t.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/)||t.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)||t.match(/[?&](?:q|ll|query|destination|daddr)=(-?\d+\.?\d*)[,+ ]+(-?\d+\.?\d*)/)||t.match(/^\s*(-?\d+\.?\d*)\s*[, ]\s*(-?\d+\.?\d*)\s*$/);
-if(!m)return null;const a=+m[1],b=+m[2];return Math.abs(a)<=90&&Math.abs(b)<=180?[a,b]:null}
+const rx=[/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/,/@(-?\d+\.?\d*),(-?\d+\.?\d*)/,/[?&](?:q|ll|query|destination|daddr)=(-?\d+\.?\d*)[,+ ]+(-?\d+\.?\d*)/,/^\s*(-?\d+\.?\d*)\s*[, ]\s*(-?\d+\.?\d*)\s*$/];
+for(const s of [t,t.replace(/\s+/g,"")]){for(const r of rx){const m=s.match(r);if(m){const a=+m[1],b=+m[2];if(Math.abs(a)<=90&&Math.abs(b)<=180)return[a,b]}}}
+return null}
 
 async function resolve(t){
 t=t.trim();let p=parseLoc(t);if(p)return{p,n:"Pin"};
@@ -98,15 +100,15 @@ if(!j.length)throw new Error("Place not found: "+t);
 return{p:[+j[0].lat,+j[0].lon],n:j[0].display_name.split(",")[0]}}
 
 function getMe(){return new Promise((res,rej)=>{
-if(!navigator.geolocation)return rej(new Error("Location not supported."));
-navigator.geolocation.getCurrentPosition(p=>res([p.coords.latitude,p.coords.longitude]),()=>rej(new Error("Couldn’t get your location. Allow location access.")),{enableHighAccuracy:true,timeout:15000})})}
+if(!navigator.geolocation)return rej(new Error("Location isn’t supported in this browser."));
+navigator.geolocation.getCurrentPosition(p=>res([p.coords.latitude,p.coords.longitude]),e=>rej(new Error(e.code===1?"Location is blocked. Open this page in Chrome (⋮ menu → Open in Chrome) and allow Location, or type your start place instead.":"Couldn’t get your location (timed out). Turn on phone Location, or type your start place instead.")),{enableHighAccuracy:false,timeout:20000,maximumAge:60000})})}
 
 async function keepAwake(){try{if(navigator.wakeLock)wl=await navigator.wakeLock.request("screen")}catch(e){}}
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&!$("trip").classList.contains("hide"))keepAwake()});
 function goFull(){try{const e=document.documentElement;(e.requestFullscreen||e.webkitRequestFullscreen).call(e)}catch(e){}}
 
 async function begin(demo){
-$("err").textContent="";$("go").disabled=$("demo").disabled=true;
+$("err").style.color="#7a828f";$("err").textContent="Working… (allow location if asked)";$("go").disabled=$("demo").disabled=true;
 try{
 const dt=$("d").value.trim();if(!dt)throw new Error("Enter a destination.");
 const st=$("s").value.trim();
@@ -127,7 +129,7 @@ if(demo){let i=0;const step=Math.max(1,Math.ceil(pts.length/70));
 timer=setInterval(()=>{i=Math.min(i+step,pts.length-1);update(pts[i],60);if(i>=pts.length-1)clearInterval(timer)},500)}
 else{watchId=navigator.geolocation.watchPosition(p=>update([p.coords.latitude,p.coords.longitude],p.coords.speed!=null?p.coords.speed*3.6:null),
 ()=>{},{enableHighAccuracy:true,maximumAge:2000,timeout:20000})}
-}catch(e){$("err").textContent=e.message}
+}catch(e){$("err").style.color="#f87171";$("err").textContent=e.message}
 $("go").disabled=$("demo").disabled=false}
 
 function tick(){$("clock").textContent=hm(new Date());$("el").textContent=fmtT((Date.now()-t0)/3600000)}
@@ -158,8 +160,9 @@ $("trip").classList.add("hide");$("setup").classList.remove("hide")}
 
 $("go").onclick=()=>begin(false);
 $("demo").onclick=()=>begin(true);
-$("stop").onclick=()=>stop(false;
+$("stop").onclick=()=>stop(false);
 $("fs").onclick=goFull;
+$("err").textContent="Ready ✓";
 </script>
 </body>
 </html>
