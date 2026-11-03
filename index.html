@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Journey</title>
+<style>
+:root{--bg:#000;--tx:#f2f4f7;--mu:#7a828f;--ac:#3b82f6;--tr:#1c2028}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font:16px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+.screen{height:100dvh;display:flex;flex-direction:column;padding:max(20px,env(safe-area-inset-top)) 22px max(20px,env(safe-area-inset-bottom))}
+.hide{display:none!important}
+/* setup */
+#setup{justify-content:center;max-width:460px;margin:0 auto;width:100%}
+h1{font-size:20px;font-weight:600;margin:0 0 24px;color:var(--mu);letter-spacing:.04em}
+label{font-size:12px;color:var(--mu);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.08em}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--tr);background:#0b0d11;color:var(--tx);font-size:16px}
+button{padding:14px;border:0;border-radius:12px;font-size:16px;font-weight:600;background:var(--ac);color:#fff;width:100%;margin-top:18px}
+button.alt{background:var(--tr);color:var(--tx);margin-top:10px}
+button:disabled{opacity:.5}
+#err{color:#f87171;font-size:13px;margin:12px 0 0;min-height:18px}
+/* dashboard */
+#trip{justify-content:space-between}
+.top{display:flex;justify-content:space-between;align-items:center;color:var(--mu);font-size:15px;gap:10px}
+.top span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42%}
+.top i{font-style:normal;flex:none}
+.mid{flex:1;display:flex;flex-direction:column;justify-content:center}
+.pct{font-size:clamp(88px,30vw,200px);font-weight:200;text-align:center;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.pct small{font-size:.35em;color:var(--mu);font-weight:300;margin-left:4px}
+.bar{height:18px;background:var(--tr);border-radius:99px;overflow:hidden;margin:26px 0 0}
+.fill{height:100%;width:0;background:var(--ac);border-radius:99px;transition:width .8s}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px 16px;padding-bottom:6px}
+.grid b{display:block;font-size:clamp(26px,8vw,44px);font-weight:500;font-variant-numeric:tabular-nums}
+.grid span{font-size:12px;color:var(--mu);text-transform:uppercase;letter-spacing:.08em}
+.grid em{font-style:normal;font-size:14px;color:var(--mu);display:block}
+.ctl{display:flex;gap:10px;margin-top:14px}
+.ctl button{margin:0;padding:11px;font-size:14px;background:var(--tr);color:var(--mu)}
+@media (orientation:landscape) and (max-height:500px){
+#trip{display:grid;grid-template-columns:1.2fr 1fr;grid-template-rows:auto 1fr auto;column-gap:30px}
+.top{grid-column:1/3}.mid{grid-column:1}.grid{grid-column:2;grid-row:2/4;align-content:center}.ctl{grid-column:1}
+.pct{font-size:clamp(70px,24vh,160px)}}
+</style>
+</head>
+<body>
+<div class="screen" id="setup">
+<h1>JOURNEY</h1>
+<label for="s">Start (empty = my location)</label>
+<input id="s" placeholder="Place, Google Maps link or coordinates">
+<label for="d">Destination</label>
+<input id="d" placeholder="Place, Google Maps link or coordinates">
+<button id="go">Start</button>
+<button class="alt" id="demo">Demo</button>
+<p id="err"></p>
+</div>
+
+<div class="screen hide" id="trip">
+<div class="top"><span id="from"></span><i id="clock"></i><span id="to" style="text-align:right"></span></div>
+<div class="mid">
+<div class="pct"><span id="pct">0</span><small>%</small></div>
+<div class="bar"><div class="fill" id="fill"></div></div>
+</div>
+<div class="grid">
+<div><span>Total</span><b id="total">–</b></div>
+<div><span>Travelled</span><b id="done">–</b></div>
+<div><span>Time travelled</span><b id="el">0m</b></div>
+<div><span>Time to reach</span><b id="eta">–</b><em id="arr"></em></div>
+</div>
+<div class="ctl"><button id="fs">Full screen</button><button id="stop">End trip</button></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let pts=[],cum=[],total=0,durH=0,best=0,watchId=null,timer=null,clockT=null,t0=0,last=null,speeds=[],wl=null;
+
+function hav(a,b){const r=x=>x*Math.PI/180,dl=r(b[0]-a[0]),dn=r(b[1]-a[1]);
+const h=Math.sin(dl/2)**2+Math.cos(r(a[0]))*Math.cos(r(b[0]))*Math.sin(dn/2)**2;return 12742*Math.asin(Math.sqrt(h))}
+const fmt=k=>k<1?Math.round(k*1000)+" m":(k<100?k.toFixed(1):Math.round(k))+" km";
+const fmtT=h=>{if(!isFinite(h)||h<0)return"–";const m=Math.round(h*60);return m<60?m+"m":Math.floor(m/60)+"h "+String(m%60).padStart(2,"0")+"m"};
+const hm=d=>d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+
+function parseLoc(t){
+try{t=decodeURIComponent((t||"").trim())}catch(e){t=(t||"").trim()}
+const m=t.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/)||t.match(/@(-?\d+\.?\d*),(-?\d+\.?\d*)/)||t.match(/[?&](?:q|ll|query|destination|daddr)=(-?\d+\.?\d*)[,+ ]+(-?\d+\.?\d*)/)||t.match(/^\s*(-?\d+\.?\d*)\s*[, ]\s*(-?\d+\.?\d*)\s*$/);
+if(!m)return null;const a=+m[1],b=+m[2];return Math.abs(a)<=90&&Math.abs(b)<=180?[a,b]:null}
+
+async function resolve(t){
+t=t.trim();let p=parseLoc(t);if(p)return{p,n:"Pin"};
+if(/^https?:\/\//i.test(t)){
+const j=await (await fetch("/api/resolve?url="+encodeURIComponent(t))).json();
+if(j.coords)return{p:j.coords,n:"Pin"};
+p=parseLoc(j.url||"");if(p)return{p,n:"Pin"};
+throw new Error("Couldn’t read a location from that link.")}
+const j=await (await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(t))).json();
+if(!j.length)throw new Error("Place not found: "+t);
+return{p:[+j[0].lat,+j[0].lon],n:j[0].display_name.split(",")[0]}}
+
+function getMe(){return new Promise((res,rej)=>{
+if(!navigator.geolocation)return rej(new Error("Location not supported."));
+navigator.geolocation.getCurrentPosition(p=>res([p.coords.latitude,p.coords.longitude]),()=>rej(new Error("Couldn’t get your location. Allow location access.")),{enableHighAccuracy:true,timeout:15000})})}
+
+async function keepAwake(){try{if(navigator.wakeLock)wl=await navigator.wakeLock.request("screen")}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&!$("trip").classList.contains("hide"))keepAwake()});
+function goFull(){try{const e=document.documentElement;(e.requestFullscreen||e.webkitRequestFullscreen).call(e)}catch(e){}}
+
+async function begin(demo){
+$("err").textContent="";$("go").disabled=$("demo").disabled=true;
+try{
+const dt=$("d").value.trim();if(!dt)throw new Error("Enter a destination.");
+const st=$("s").value.trim();
+const A=st?await resolve(st):{p:await getMe(),n:"My location"};
+const B=await resolve(dt);
+const r=await (await fetch(`https://router.project-osrm.org/route/v1/driving/${A.p[1]},${A.p[0]};${B.p[1]},${B.p[0]}?overview=full&geometries=geojson`)).json();
+if(!r.routes||!r.routes[0])throw new Error("No road route found between these places.");
+const rt=r.routes[0];
+pts=rt.geometry.coordinates.map(c=>[c[1],c[0]]);
+cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+hav(pts[i-1],pts[i]));
+total=rt.distance/1000;durH=rt.duration/3600;best=0;last=null;speeds=[];t0=Date.now();
+$("from").textContent=A.n;$("to").textContent=B.n;$("total").textContent=fmt(total);
+$("setup").classList.add("hide");$("trip").classList.remove("hide");
+keepAwake();goFull();
+clockT=setInterval(tick,1000);tick();
+update(A.p,null);
+if(demo){let i=0;const step=Math.max(1,Math.ceil(pts.length/70));
+timer=setInterval(()=>{i=Math.min(i+step,pts.length-1);update(pts[i],60);if(i>=pts.length-1)clearInterval(timer)},500)}
+else{watchId=navigator.geolocation.watchPosition(p=>update([p.coords.latitude,p.coords.longitude],p.coords.speed!=null?p.coords.speed*3.6:null),
+()=>{},{enableHighAccuracy:true,maximumAge:2000,timeout:20000})}
+}catch(e){$("err").textContent=e.message}
+$("go").disabled=$("demo").disabled=false}
+
+function tick(){$("clock").textContent=hm(new Date());$("el").textContent=fmtT((Date.now()-t0)/3600000)}
+
+function update(pos,kmh){
+let bi=0,bd=Infinity;
+for(let i=0;i<pts.length;i++){const d=(pts[i][0]-pos[0])**2+(pts[i][1]-pos[1])**2;if(d<bd){bd=d;bi=i}}
+best=Math.max(best,cum[bi]/cum[cum.length-1]);
+const f=best,now=Date.now();
+if(kmh==null&&last){const dt=(now-last.t)/3600000;if(dt>0)kmh=hav(last.p,pos)/dt}
+if(kmh!=null&&isFinite(kmh)&&kmh<300){speeds.push(kmh);if(speeds.length>8)speeds.shift()}
+last={p:pos,t:now};
+const avg=speeds.length?speeds.reduce((a,b)=>a+b,0)/speeds.length:0;
+const rem=total*(1-f),etaH=avg>5?rem/avg:durH*(1-f);
+$("pct").textContent=Math.round(f*100);$("fill").style.width=f*100+"%";
+$("done").textContent=fmt(total*f);
+$("eta").textContent=fmtT(etaH);
+$("arr").textContent=f>0.995?"":"Arrive "+hm(new Date(now+etaH*3600000));
+if(f>0.995){$("pct").textContent="100";$("fill").style.width="100%";$("eta").textContent="Arrived";stop(true)}}
+
+function stop(keep){
+if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null}
+if(timer){clearInterval(timer);timer=null}
+if(keep)return;
+clearInterval(clockT);
+try{if(wl)wl.release();if(document.fullscreenElement)document.exitFullscreen()}catch(e){}
+$("trip").classList.add("hide");$("setup").classList.remove("hide")}
+
+$("go").onclick=()=>begin(false);
+$("demo").onclick=()=>begin(true);
+$("stop").onclick=()=>stop(false;
+$("fs").onclick=goFull;
+</script>
+</body>
+</html>
